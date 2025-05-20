@@ -113,19 +113,30 @@ impl AuthState {
     pub async fn verify_refresh_token(&self, token: &str) -> Result<Option<User>, sqlx::Error> {
         let now = Utc::now();
         
+        // Start a transaction
+        let mut tx = self.db.begin().await?;
+        
+        // Get the user and delete the token in one transaction
         let user = sqlx::query_as!(
             User,
             r#"
+            WITH deleted_token AS (
+                DELETE FROM refresh_tokens 
+                WHERE token = $1 AND expires_at > $2
+                RETURNING user_id
+            )
             SELECT u.id, u.username, u.password_hash, u.role
             FROM users u
-            JOIN refresh_tokens rt ON u.id = rt.user_id
-            WHERE rt.token = $1 AND rt.expires_at > $2
+            JOIN deleted_token dt ON u.id = dt.user_id
             "#,
             token,
             now
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&mut *tx)
         .await?;
+
+        // Commit the transaction
+        tx.commit().await?;
 
         Ok(user)
     }
