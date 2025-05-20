@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid;
 
-use crate::auth::{AuthUser, Credentials};
+use crate::auth::{AuthUser, Credentials, RefreshTokenRequest, TokenResponse};
 use crate::rbac::{RequirePermission, check_permission};
 use crate::AppState;
 
@@ -17,11 +17,6 @@ pub struct RegisterUser {
     username: String,
     password: String,
     role: String,
-}
-
-#[derive(Serialize)]
-pub struct LoginResponse {
-    token: String,
 }
 
 pub async fn home() -> &'static str {
@@ -64,15 +59,50 @@ pub async fn login(
     match state.auth.authenticate(&credentials).await {
         Ok(Some(user)) => {
             match state.auth.create_token(&user) {
-                Ok(token) => {
-                    let response = LoginResponse { token };
-                    (StatusCode::OK, Json(response)).into_response()
+                Ok(access_token) => {
+                    match state.auth.create_refresh_token(user.id).await {
+                        Ok(refresh_token) => {
+                            let response = TokenResponse {
+                                access_token,
+                                refresh_token,
+                            };
+                            (StatusCode::OK, Json(response)).into_response()
+                        }
+                        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create refresh token").into_response(),
+                    }
                 }
-                Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create token").into_response(),
+                Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create access token").into_response(),
             }
         }
         Ok(None) => (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Authentication failed").into_response(),
+    }
+}
+
+pub async fn refresh_token(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<RefreshTokenRequest>,
+) -> impl IntoResponse {
+    match state.auth.verify_refresh_token(&request.refresh_token).await {
+        Ok(Some(user)) => {
+            match state.auth.create_token(&user) {
+                Ok(access_token) => {
+                    match state.auth.create_refresh_token(user.id).await {
+                        Ok(refresh_token) => {
+                            let response = TokenResponse {
+                                access_token,
+                                refresh_token,
+                            };
+                            (StatusCode::OK, Json(response)).into_response()
+                        }
+                        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create refresh token").into_response(),
+                    }
+                }
+                Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create access token").into_response(),
+            }
+        }
+        Ok(None) => (StatusCode::UNAUTHORIZED, "Invalid refresh token").into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Token refresh failed").into_response(),
     }
 }
 

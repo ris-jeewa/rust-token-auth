@@ -70,6 +70,7 @@ async fn main() {
         .route("/", get(routes::home))
         .route("/login", post(routes::login))
         .route("/register", post(routes::register))
+        .route("/refresh", post(routes::refresh_token))
         .route("/protected", get(routes::protected))
         .with_state(app_state.clone())
         .layer(middleware::from_fn_with_state(

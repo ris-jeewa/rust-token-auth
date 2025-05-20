@@ -7,7 +7,7 @@ use axum::{
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
 };
-use tracing::{error, info};
+use tracing::{error};
 
 pub struct RbacEnforcer {
     enforcer: Arc<RwLock<Enforcer>>,

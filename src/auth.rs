@@ -34,6 +34,17 @@ pub struct Credentials {
     pub password: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TokenResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
 #[derive(Clone)]
 pub struct AuthState {
     pub db: PgPool,
@@ -65,7 +76,7 @@ impl AuthState {
 
     pub fn create_token(&self, user: &User) -> Result<String, jsonwebtoken::errors::Error> {
         let expiration = Utc::now()
-            .checked_add_signed(Duration::hours(24))
+            .checked_add_signed(Duration::hours(1)) // Access token expires in 1 hour
             .expect("valid timestamp")
             .timestamp();
 
@@ -80,6 +91,43 @@ impl AuthState {
             &claims,
             &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
         )
+    }
+
+    pub async fn create_refresh_token(&self, user_id: Uuid) -> Result<String, sqlx::Error> {
+        let token = Uuid::new_v4().to_string();
+        let expires_at = Utc::now() + Duration::days(30); // Refresh token expires in 30 days
+
+        sqlx::query!(
+            "INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)",
+            Uuid::new_v4(),
+            user_id,
+            token,
+            expires_at
+        )
+        .execute(&self.db)
+        .await?;
+
+        Ok(token)
+    }
+
+    pub async fn verify_refresh_token(&self, token: &str) -> Result<Option<User>, sqlx::Error> {
+        let now = Utc::now();
+        
+        let user = sqlx::query_as!(
+            User,
+            r#"
+            SELECT u.id, u.username, u.password_hash, u.role
+            FROM users u
+            JOIN refresh_tokens rt ON u.id = rt.user_id
+            WHERE rt.token = $1 AND rt.expires_at > $2
+            "#,
+            token,
+            now
+        )
+        .fetch_optional(&self.db)
+        .await?;
+
+        Ok(user)
     }
 
     pub fn verify_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
