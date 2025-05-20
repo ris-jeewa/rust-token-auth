@@ -1,0 +1,6 @@
+p, admin, /protected, GET
+p, user, /protected, GET
+p, user, /register, POST
+p, admin, /register, POST
+g, alice, admin
+g, bob, user 
